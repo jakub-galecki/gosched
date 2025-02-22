@@ -1,0 +1,16 @@
+syntax = "proto3";
+option go_package = "github.com/gosched/scheduler/pb";
+
+package scheduler;
+
+message Empty {}
+
+message Task {
+    string method = 1;
+    string params = 2;
+    string at = 3;
+}
+
+service SchedulerServer {
+    rpc Register(Task) returns (Empty) {}
+}
