@@ -16,29 +16,25 @@ const (
 )
 
 type Scheduler struct {
-	dbPath   string
-	db       *sql.DB
+	dbPath string
+	db     *sql.DB
 
 	level     *slog.LevelVar
 	logger    *slog.Logger
 	exitChan  chan struct{}
 	w         *worker // make it array, or create workers manager
 	taskQueue chan *Task
-    
-    cache *fastcache.Cache // make iface 
 
-    handler Handler
+	cache *fastcache.Cache // make iface
+
+	handler Handler
 
 	opts struct {
-		batch bool
+		batchSize int
 	}
 }
 
 type Option func(*Scheduler)
-
-type Options struct {
-	endpoint string
-}
 
 func WithHandler(h Handler) Option {
 	return func(s *Scheduler) {
@@ -58,9 +54,14 @@ func WithDebugLevel(level slog.Level) Option {
 	}
 }
 
+func WithBatchSize(sz int) Option {
+	return func(s *Scheduler) {
+		s.opts.batchSize = sz
+	}
+}
+
 // todo: self balancing workers reading database
 // todo: cache completed tasks ??
-// todo: register methods from file
 
 func NewScheduler(opts ...Option) (*Scheduler, error) {
 	levelVar := new(slog.LevelVar)
@@ -81,8 +82,8 @@ func NewScheduler(opts ...Option) (*Scheduler, error) {
 			slog.Any("err", err))
 		return nil, err
 	}
-    
-    s.cache = fastcache.New(4096) // 32MB by default
+
+	s.cache = fastcache.New(4096) // 32MB by default
 	s.db = db
 	s.taskQueue = make(chan *Task)
 	s.logger.Info("starting scheduler",
@@ -99,9 +100,6 @@ func (s *Scheduler) Start() {
 	for {
 		select {
 		case t := <-s.taskQueue:
-			if s.opts.batch {
-				// todo:
-			}
 			err := s.register(t)
 			if err != nil {
 				s.logger.Error("error registering task",

@@ -7,7 +7,7 @@ import (
 
 const (
 	insertTask = "INSERT INTO tasks(method, parameters, at) VALUES(?, ?, ?)"
-	updAteTask = "UPDATE tasks SET completed=1"
+	updAteTask = "UPDATE tasks SET completed=1 where id=?"
 )
 
 type Task struct {
@@ -27,6 +27,6 @@ func (t *Task) insert(tx *sql.Tx) (sql.Result, error) {
 	return tx.Exec(insertTask, t.Method, t.Parameters, t.At)
 }
 
-func (t *Task) markAsDone(db *sql.DB) (sql.Result, error) {
-	return db.Exec(updAteTask)
+func (t *Task) markAsDone(tx *sql.Tx) (sql.Result, error) {
+	return tx.Exec(updAteTask, t.Id)
 }
