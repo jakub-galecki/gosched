@@ -60,6 +60,9 @@ func WithBatchSize(sz int) Option {
 	}
 }
 
+type Database interface {
+}
+
 // todo: self balancing workers reading database
 // todo: cache completed tasks ??
 

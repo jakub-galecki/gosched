@@ -3,16 +3,18 @@ package scheduler
 import (
 	"database/sql"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/VictoriaMetrics/fastcache"
-	"github.com/hashicorp/go-multierror"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
-	ttime            = 10 * time.Second
-	initialBatchSize = 10
-	btime            = 5 * time.Second
+	ttime                 = 10 * time.Second
+	initialBatchSize      = 10
+	btime                 = 5 * time.Second
+	gorutinesHandlerLimit = 10
 )
 
 type worker struct {
@@ -80,11 +82,7 @@ func (w *worker) start() {
 			}
 			w.logger.Debug("found some tasks", slog.Int("number_of_tasks", len(tt)))
 			for _, t := range tt {
-				if err := w.h.Handle(t); err != nil {
-					w.logger.Error("error from handler", slog.Any("err", err))
-				} else {
-					w.finishTask(t)
-				}
+				w.finishTask(t)
 			}
 		case <-w.batchLiveTime.C:
 			w.logger.Debug("im in batch ticker to commit")
@@ -127,17 +125,52 @@ func (w *worker) commitBatch(b *batch) error {
 	if err != nil {
 		return err
 	}
-	var errg *multierror.Error
+
+	var errg errgroup.Group
+	errg.SetLimit(gorutinesHandlerLimit)
+	stats := &stats{}
 	for it.hasNext() {
 		t := it.next()
-		err = w.h.Handle(t)
-		if err == nil {
-			t.markAsDone(tx)
-		}
-		errg = multierror.Append(errg, err)
+		errg.Go(func() error {
+			err = w.h.Handle(t)
+			stats.add(err == nil)
+			if err == nil {
+				t.markAsDone(tx)
+			}
+			return err
+		})
 	}
+	// todo: count number of retries
 	// commit what can be commited
+	err = errg.Wait()
+	if err != nil {
+		w.logger.Error("error handling task", slog.Any("err", err))
+		return nil
+	}
 	err = tx.Commit()
-	w.logger.Debug("[commitBatch] took", slog.Int64("time ms", time.Since(now).Milliseconds()))
-	return multierror.Append(errg, err).ErrorOrNil()
+	if err != nil {
+		w.logger.Error("error commiting", slog.Any("err", err))
+		return err
+	}
+	w.logger.Debug("commited batch",
+		slog.Int64("time ms", time.Since(now).Milliseconds()),
+		slog.Uint64("total", uint64(stats.total.Load())),
+		slog.Uint64("succeed", uint64(stats.succeed.Load())),
+		slog.Uint64("failed", uint64(stats.failed.Load())))
+	return nil
+}
+
+type stats struct {
+	total   atomic.Uint32
+	succeed atomic.Uint32
+	failed  atomic.Uint32
+}
+
+func (s *stats) add(ok bool) {
+	s.total.Add(1)
+	if ok {
+		s.succeed.Add(1)
+		return
+	}
+	s.failed.Add(1)
 }
