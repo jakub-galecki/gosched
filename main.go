@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -12,13 +13,13 @@ import (
 )
 
 type Config struct {
-	DatabaseType string
-	DatabasePath string
+	DatabaseType string `yaml:"database_type"`
+	DatabasePath string `yaml:"database_path"`
 
-	Port string
+	Port string `yaml:"port"`
 
-	SinkType    string
-	SinkAddress string
+	SinkType    string `yaml:"sink_type"`
+	SinkAddress string `yaml:"sink_address"`
 }
 
 // todo reformat
@@ -58,6 +59,9 @@ func (c *Config) toOptions(l *slog.Logger) ([]scheduler.Option, error) {
 func main() {
 
 	conff := flag.String("config_file", "", "path to a configuration file")
+
+	flag.Parse()
+
 	if conff == nil || *conff == "" {
 		panic(errors.New("empty config file"))
 	}

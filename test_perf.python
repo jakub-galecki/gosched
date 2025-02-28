@@ -1,0 +1,15 @@
+#!/usr/bin/python3
+
+import http.client
+
+conn = http.client.HTTPConnection("localhost:8080")
+
+payload = "{\n  \"method\": \"notify\",\n  \"params\": \"{\\\"name\\\": \\\"zuzia\\\"}\",\n  \"at\": \"2025-02-26T19:10:00+01:00\"\n}"
+
+headers = { 'content-type': "application/json" }
+
+for i in range(0,100000):
+    conn.request("POST", "/scheduler.SchedulerServer/Register", payload, headers)
+    res= conn.getresponse()
+    data = res.read()
+    # print(data.decode("utf-8"))

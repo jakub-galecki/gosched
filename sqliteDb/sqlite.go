@@ -21,17 +21,6 @@ const (
 	createTaskTable = `CREATE TABLE "tasks" ("id" INTEGER,"method" TEXT NOT NULL,"parameters" TEXT NOT NULL,"at" datetime NOT NULL,"completed" INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (id));`
 )
 
-/*
-	db, err := sql.Open("sqlite3", s.dbPath)
-	if err != nil {
-		s.logger.Error("error while opening database",
-			slog.Any("err", err))
-		return nil, err
-	}
-
-
-*/
-
 type sqliteHandler struct {
 	db *sql.DB
 }

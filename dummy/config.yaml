@@ -1,5 +1,5 @@
-databaseType: "sqlite"
-databasePath: "./scheduler/scheduler.db"
+database_type: sqlite
+database_path: ./scheduler/scheduler.db
 port: ":8080"
-sinkType: "http"
-sinkAddress: "http://localhost:9000"
+sink_type: http
+sink_address: "http://localhost:9000"
