@@ -1,13 +1,7 @@
 package scheduler
 
 import (
-	"database/sql"
 	"time"
-)
-
-const (
-	insertTask = "INSERT INTO tasks(method, parameters, at) VALUES(?, ?, ?)"
-	updAteTask = "UPDATE tasks SET completed=1 where id=?"
 )
 
 type Task struct {
@@ -16,17 +10,13 @@ type Task struct {
 	Parameters string
 
 	At        time.Time
-	Completed sql.NullBool
+	Completed bool
 }
 
-func (t *Task) isCompleted() bool {
-	return t.Completed.Bool
+func (t *Task) insert(tx Transaction) (Result, error) {
+	return tx.InsertTask(t)
 }
 
-func (t *Task) insert(tx *sql.Tx) (sql.Result, error) {
-	return tx.Exec(insertTask, t.Method, t.Parameters, t.At)
-}
-
-func (t *Task) markAsDone(tx *sql.Tx) (sql.Result, error) {
-	return tx.Exec(updAteTask, t.Id)
+func (t *Task) markAsDone(tx Transaction) (Result, error) {
+	return tx.CompleteTask(t.Id)
 }

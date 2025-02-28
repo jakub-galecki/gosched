@@ -1,7 +1,7 @@
 package scheduler
 
 import (
-	"database/sql"
+	"context"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -18,7 +18,7 @@ const (
 )
 
 type worker struct {
-	db *sql.DB
+	db Database
 
 	ticker   *time.Ticker
 	exitChan chan struct{}
@@ -46,8 +46,7 @@ func (s *Scheduler) newWorker() *worker {
 
 func (w *worker) findTasks() ([]*Task, error) {
 	tt := time.Now()
-
-	res, err := w.db.Query("SELECT * from tasks WHERE at < ? and (completed=0 or completed is null)", tt)
+	res, err := w.db.FindNotCompleted(tt)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +120,7 @@ func (w *worker) commitBatch(b *batch) error {
 	now := time.Now()
 
 	it := b.iter()
-	tx, err := w.db.Begin()
+	tx, err := w.db.Begin(context.Background())
 	if err != nil {
 		return err
 	}

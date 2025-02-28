@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gosched/scheduler/pb"
@@ -51,7 +52,7 @@ func (s *Server) Register(ctx context.Context, pbt *pb.Task) (*pb.Empty, error) 
 	return emptyRes, nil
 }
 
-func startServer(q chan *Task) error {
+func startServer(q chan *Task, port string) error {
 	s := &Server{
 		taskQue: q,
 	}
@@ -62,7 +63,11 @@ func startServer(q chan *Task) error {
 		return err
 	}
 
-	lis, err := net.Listen("tcp", ":8080")
+	if !strings.HasPrefix(port, ":") {
+		port = ":" + port
+	}
+
+	lis, err := net.Listen("tcp", port)
 	if err != nil {
 		return err
 	}

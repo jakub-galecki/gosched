@@ -2,7 +2,7 @@ package scheduler
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"log/slog"
 	"os"
 	"time"
@@ -16,8 +16,7 @@ const (
 )
 
 type Scheduler struct {
-	dbPath string
-	db     *sql.DB
+	db Database
 
 	level     *slog.LevelVar
 	logger    *slog.Logger
@@ -31,6 +30,7 @@ type Scheduler struct {
 
 	opts struct {
 		batchSize int
+		port      string
 	}
 }
 
@@ -42,9 +42,9 @@ func WithHandler(h Handler) Option {
 	}
 }
 
-func WithDatabasePath(dbpath string) Option {
+func WithDatabase(db Database) Option {
 	return func(s *Scheduler) {
-		s.dbPath = dbpath
+		s.db = db
 	}
 }
 
@@ -60,7 +60,10 @@ func WithBatchSize(sz int) Option {
 	}
 }
 
-type Database interface {
+func WithPort(port string) Option {
+	return func(s *Scheduler) {
+		s.opts.port = port
+	}
 }
 
 // todo: self balancing workers reading database
@@ -78,27 +81,19 @@ func NewScheduler(opts ...Option) (*Scheduler, error) {
 	for _, opt := range opts {
 		opt(s)
 	}
-
-	db, err := sql.Open("sqlite3", s.dbPath)
-	if err != nil {
-		s.logger.Error("error while opening database",
-			slog.Any("err", err))
-		return nil, err
+	if s.db == nil {
+		return nil, errors.New("empty database")
 	}
-
 	s.cache = fastcache.New(4096) // 32MB by default
-	s.db = db
 	s.taskQueue = make(chan *Task)
-	s.logger.Info("starting scheduler",
-		slog.String("db_path", s.dbPath),
-	)
+	s.logger.Info("starting scheduler")
 	s.w = s.newWorker()
 	return s, nil
 }
 
 func (s *Scheduler) Start() {
 	go s.w.start()
-	go startServer(s.taskQueue)
+	go startServer(s.taskQueue, s.opts.port)
 	s.logger.Debug("server started")
 	for {
 		select {
@@ -122,7 +117,7 @@ func (s *Scheduler) register(t *Task) error {
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(50*time.Millisecond))
 	defer cancel()
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		s.logger.Error("couldn't begin transaction", slog.Any("err", err))
 		return err
