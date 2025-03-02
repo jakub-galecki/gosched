@@ -39,6 +39,7 @@ type Scheduler struct {
 		batchSize        int
 		port             string
 		groupingStrategy map[string]GroupingStrategy
+		ticker           *time.Duration
 	}
 }
 
@@ -77,6 +78,12 @@ func WithPort(port string) Option {
 func WithGroupingStrategy(m map[string]GroupingStrategy) Option {
 	return func(s *Scheduler) {
 		s.opts.groupingStrategy = m
+	}
+}
+
+func WithTicker(ticker *time.Duration) Option {
+	return func(s *Scheduler) {
+		s.opts.ticker = ticker
 	}
 }
 

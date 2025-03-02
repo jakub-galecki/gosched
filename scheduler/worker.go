@@ -24,7 +24,7 @@ type worker struct {
 	ticker   *time.Ticker
 	exitChan chan struct{}
 	logger   *slog.Logger
-
+	ttime    time.Duration
 	// shared among workers
 	cache         *fastcache.Cache
 	h             Handler
@@ -41,7 +41,6 @@ func (s *Scheduler) newWorker() (*worker, error) {
 		db:            s.db,
 		exitChan:      make(chan struct{}),
 		logger:        s.logger,
-		ticker:        time.NewTicker(ttime),
 		h:             s.handler,
 		batchLiveTime: time.NewTicker(btime),
 		batchSize:     s.opts.batchSize,
@@ -49,6 +48,12 @@ func (s *Scheduler) newWorker() (*worker, error) {
 		grouped:       make(chan []byte),
 		cache:         s.cache,
 	}
+	if s.opts.ticker != nil {
+		w.ttime = *s.opts.ticker
+	} else {
+		w.ttime = ttime
+	}
+	w.ticker = time.NewTicker(w.ttime)
 	err := w.initCache()
 	if err != nil {
 		return nil, err
