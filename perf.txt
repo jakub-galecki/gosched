@@ -3,3 +3,6 @@
 {"msg":"commited batch","time ms":340,"total":10000,"succeed":10000,"failed":0}
 {"msg":"commited batch","time ms":6268,"total":66081,"succeed":66081,"failed":0}
 
+2.
+{"time":"2025-03-02T14:06:28.282593+01:00","level":"DEBUG","msg":"commited batch","time ms":40874,"total":142453,"succeed":142453,"failed":0}
+{"time":"2025-03-02T14:06:42.049302+01:00","level":"DEBUG","msg":"commited batch","time ms":13657,"total":64500,"succeed":64500,"failed":0}

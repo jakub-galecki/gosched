@@ -4,11 +4,15 @@ import http.client
 
 conn = http.client.HTTPConnection("localhost:8080")
 
-payload = "{\n  \"method\": \"notify\",\n  \"params\": \"{\\\"name\\\": \\\"zuzia\\\"}\",\n  \"at\": \"2025-02-26T19:10:00+01:00\"\n}"
+payload = {
+    "method": "kiss",
+    "params": "{\"name\": \"zuzia\"}",
+    "at": "2025-02-26T19:10:00+01:00"
+}
 
 headers = { 'content-type': "application/json" }
 
-for i in range(0,100000):
+for i in range(0,10):
     conn.request("POST", "/scheduler.SchedulerServer/Register", payload, headers)
     res= conn.getresponse()
     data = res.read()

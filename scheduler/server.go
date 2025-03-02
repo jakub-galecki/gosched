@@ -28,7 +28,6 @@ type Server struct {
 }
 
 func (s *Server) Register(ctx context.Context, pbt *pb.Task) (*pb.Empty, error) {
-	// todo:
 	if pbt == nil {
 		return emptyRes, errors.New("empty task")
 	}
@@ -48,6 +47,7 @@ func (s *Server) Register(ctx context.Context, pbt *pb.Task) (*pb.Empty, error) 
 		Parameters: pbt.Params,
 		At:         at,
 	}
+
 	s.taskQue <- t
 	return emptyRes, nil
 }

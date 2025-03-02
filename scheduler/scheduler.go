@@ -15,6 +15,12 @@ const (
 	dbName = "scheduler.db"
 )
 
+type GroupingStrategy struct {
+	Method     string
+	TimeFormat string
+	Param      []string
+}
+
 type Scheduler struct {
 	db Database
 
@@ -27,10 +33,12 @@ type Scheduler struct {
 	cache *fastcache.Cache // make iface
 
 	handler Handler
+	logfile *os.File
 
 	opts struct {
-		batchSize int
-		port      string
+		batchSize        int
+		port             string
+		groupingStrategy map[string]GroupingStrategy
 	}
 }
 
@@ -66,17 +74,31 @@ func WithPort(port string) Option {
 	}
 }
 
-// todo: self balancing workers reading database
-// todo: cache completed tasks ??
+func WithGroupingStrategy(m map[string]GroupingStrategy) Option {
+	return func(s *Scheduler) {
+		s.opts.groupingStrategy = m
+	}
+}
 
-func NewScheduler(opts ...Option) (*Scheduler, error) {
+func NewScheduler(logPath string, opts ...Option) (*Scheduler, error) {
 	levelVar := new(slog.LevelVar)
 	levelVar.Set(slog.LevelDebug)
+	var out *os.File
+	var err error
+	if logPath != "" {
+		out, err = os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		out = os.Stdout
+	}
 	s := &Scheduler{
 		level: new(slog.LevelVar),
-		logger: slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		logger: slog.New(slog.NewJSONHandler(out, &slog.HandlerOptions{
 			Level: levelVar,
 		})),
+		logfile: out,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -86,14 +108,26 @@ func NewScheduler(opts ...Option) (*Scheduler, error) {
 	}
 	s.cache = fastcache.New(4096) // 32MB by default
 	s.taskQueue = make(chan *Task)
-	s.logger.Info("starting scheduler")
-	s.w = s.newWorker()
+	s.logger.Info("starting scheduler",
+		slog.Any("strategy", s.opts.groupingStrategy))
+	s.w, err = s.newWorker()
+	if err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
 func (s *Scheduler) Start() {
 	go s.w.start()
-	go startServer(s.taskQueue, s.opts.port)
+	go func() {
+		err := startServer(s.taskQueue, s.opts.port)
+		if err != nil {
+			s.logger.Error("error initializing server", slog.Any("error", err))
+			return
+		}
+	}()
+	//sigs := make(chan os.Signal, 1)
+	//signal.Notify(sigs, syscall.SIGINT)
 	s.logger.Debug("server started")
 	for {
 		select {
@@ -103,16 +137,19 @@ func (s *Scheduler) Start() {
 				s.logger.Error("error registering task",
 					slog.Any("err", err),
 					slog.String("method", t.Method),
-					slog.String("parameters", t.Parameters),
+					slog.Any("parameters", t.Parameters),
 					slog.Time("at", t.At))
 			}
+		//case <-sigs:
+		//	s.logger.Info("received shutdown signal")
+		//	s.exitChan <- struct{}{}
 		case <-s.exitChan:
 			s.w.exitChan <- struct{}{}
+			return
 		}
 	}
 }
 
-// todo: add batch register
 func (s *Scheduler) register(t *Task) error {
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(50*time.Millisecond))
 	defer cancel()

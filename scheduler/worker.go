@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -14,7 +15,7 @@ const (
 	ttime                 = 10 * time.Second
 	initialBatchSize      = 10
 	btime                 = 5 * time.Second
-	gorutinesHandlerLimit = 10
+	gorutinesHandlerLimit = 20
 )
 
 type worker struct {
@@ -30,10 +31,13 @@ type worker struct {
 	batchLiveTime *time.Ticker // time after which batch will by commited manually
 	batch         *batch
 	batchSize     int
+	strategy      map[string]GroupingStrategy
+	bmu           sync.Mutex
+	grouped       chan []byte
 }
 
-func (s *Scheduler) newWorker() *worker {
-	return &worker{
+func (s *Scheduler) newWorker() (*worker, error) {
+	w := &worker{
 		db:            s.db,
 		exitChan:      make(chan struct{}),
 		logger:        s.logger,
@@ -41,24 +45,74 @@ func (s *Scheduler) newWorker() *worker {
 		h:             s.handler,
 		batchLiveTime: time.NewTicker(btime),
 		batchSize:     s.opts.batchSize,
+		strategy:      s.opts.groupingStrategy,
+		grouped:       make(chan []byte),
+		cache:         s.cache,
 	}
+	err := w.initCache()
+	if err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+func (w *worker) initCache() error {
+	rows, err := w.db.GetProcessed()
+	if err != nil {
+		return err
+	}
+	var (
+		key []byte
+	)
+
+	var (
+		keys []string
+	)
+
+	defer rows.Close()
+
+	for rows.Next() {
+		if err := rows.Scan(&key); err != nil {
+			return err
+		}
+
+		w.cache.Set(key, nil)
+		keys = append(keys, string(key))
+	}
+
+	w.logger.Debug("initialized cache",
+		slog.Any("keys", keys))
+
+	return nil
 }
 
 func (w *worker) findTasks() ([]*Task, error) {
 	tt := time.Now()
+
 	res, err := w.db.FindNotCompleted(tt)
 	if err != nil {
 		return nil, err
 	}
-	var tasks []*Task
+
+	defer func() {
+		err = res.Close()
+		if err != nil {
+			w.logger.Error("error while closing iterator", slog.Any("error", err))
+		}
+	}()
+
+	var (
+		tasks []*Task
+	)
 
 	for res.Next() {
-		var task Task
-		if err := res.Scan(&task.Id, &task.Method, &task.Parameters, &task.At, &task.Completed); err != nil {
+		t := EmptyTask()
+		err := res.Into(t)
+		if err != nil {
 			return nil, err
 		}
 
-		tasks = append(tasks, &task)
+		tasks = append(tasks, t)
 	}
 
 	if err = res.Err(); err != nil {
@@ -69,6 +123,7 @@ func (w *worker) findTasks() ([]*Task, error) {
 }
 
 func (w *worker) start() {
+	go w.groupedWorker()
 	for {
 		select {
 		case <-w.ticker.C:
@@ -92,9 +147,23 @@ func (w *worker) start() {
 	}
 }
 
+func (w *worker) groupedWorker() {
+	for key := range w.grouped {
+		res, err := w.db.InsertProcessed(key)
+		if err != nil {
+			w.logger.Error("error while inserting processed", slog.Any("error", err))
+		} else {
+			id, _ := res.LastInsertId()
+			w.logger.Debug("inserted processed key",
+				slog.String("key", string(key)),
+				slog.Int64("id", id))
+		}
+	}
+}
+
 func (w *worker) finishTask(t *Task) {
 	if w.batch == nil {
-		w.batch = newBatch(w.batchSize)
+		w.batch = newBatch(w.batchSize, w.strategy, w.cache, w.grouped)
 	}
 
 	if w.batch.ready() {
@@ -109,11 +178,14 @@ func (w *worker) commitBatch(b *batch) error {
 		return nil
 	}
 
+	w.bmu.Lock()
+	defer w.bmu.Unlock()
+
 	defer func() {
 		b.reset()
 	}()
 
-	if len(b.tasks) == 0 {
+	if len(b.tasks) == 0 && len(b.excluded) == 0 {
 		return nil
 	}
 
@@ -134,28 +206,53 @@ func (w *worker) commitBatch(b *batch) error {
 			err = w.h.Handle(t)
 			stats.add(err == nil)
 			if err == nil {
-				t.markAsDone(tx)
+				_, err = t.markAsDone(tx)
+				if err != nil {
+					w.logger.Error("error while marking task as done", slog.Any("error", err))
+				}
+			} else {
+				_, err = t.markAsFailed(tx)
+				if err != nil {
+					w.logger.Error("error while marking task as failed", slog.Any("error", err))
+				}
 			}
+			t.Dispose()
 			return err
 		})
 	}
-	// todo: count number of retries
-	// commit what can be commited
+
+	if len(b.excluded) > 0 {
+		errg.Go(func() error {
+			for _, t := range b.excluded {
+				_, err = t.markAsDone(tx)
+				if err != nil {
+					w.logger.Error("error while marking excluded",
+						slog.Any("error", err))
+				}
+			}
+			return nil
+		})
+
+	}
+
 	err = errg.Wait()
 	if err != nil {
 		w.logger.Error("error handling task", slog.Any("err", err))
 		return nil
 	}
+
 	err = tx.Commit()
 	if err != nil {
 		w.logger.Error("error commiting", slog.Any("err", err))
 		return err
 	}
+
 	w.logger.Debug("commited batch",
-		slog.Int64("time ms", time.Since(now).Milliseconds()),
+		slog.Float64("time s", time.Since(now).Seconds()),
 		slog.Uint64("total", uint64(stats.total.Load())),
 		slog.Uint64("succeed", uint64(stats.succeed.Load())),
-		slog.Uint64("failed", uint64(stats.failed.Load())))
+		slog.Uint64("failed", uint64(stats.failed.Load())),
+		slog.Int("grouped", len(b.excluded)))
 	return nil
 }
 

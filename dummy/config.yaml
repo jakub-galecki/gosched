@@ -3,3 +3,11 @@ database_path: ./scheduler/scheduler.db
 port: ":8080"
 sink_type: http
 sink_address: "http://localhost:9000"
+sink_log: "./sink.log"
+scheduler_log: "./scheduler.log"
+grouping:
+  - name: notify
+    method: notify
+    time_format: 20060102
+    param:
+      - name

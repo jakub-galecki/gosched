@@ -6,16 +6,24 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 )
 
 type Handler interface {
 	Handle(*Task) error
 }
 
-func NewHttpHandler(addr string, logger *slog.Logger) *HttpHandler {
+func NewHttpHandler(addr string, logPath string) *HttpHandler {
+	out, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		return nil
+	}
+	l := slog.New(slog.NewJSONHandler(out, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
 	return &HttpHandler{
 		addr:   addr,
-		logger: logger,
+		logger: l,
 	}
 }
 
@@ -33,7 +41,7 @@ func (h *HttpHandler) Handle(t *Task) error {
 
 	h.logger.Debug("handling task",
 		slog.String("method", t.Method),
-		slog.String("params", t.Parameters))
+		slog.Any("params", t.Parameters))
 
 	req, err := http.NewRequest("GET", uri, nil)
 	if err != nil {
@@ -41,7 +49,9 @@ func (h *HttpHandler) Handle(t *Task) error {
 	}
 
 	q := req.URL.Query()
-	q.Set("params", t.Parameters)
+	for k, v := range t.Parameters {
+		q.Set(k, v)
+	}
 	req.URL.RawQuery = q.Encode()
 	reqUrl := req.URL.String()
 	res, err := http.Get(reqUrl)
@@ -51,8 +61,11 @@ func (h *HttpHandler) Handle(t *Task) error {
 
 	h.logger.Debug("sending message", slog.String("uri", reqUrl))
 
-	if res.StatusCode != 200 {
-		h.logger.Error("invalid status code", slog.Int("status_code", res.StatusCode))
+	if res.StatusCode > 201 {
+		body, _ := io.ReadAll(res.Body)
+		h.logger.Error("invalid status code",
+			slog.Int("status_code", res.StatusCode),
+			slog.String("response", string(body)))
 		return errors.New("invalid status code")
 	}
 
