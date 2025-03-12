@@ -18,6 +18,7 @@ type Task struct {
 	Parameters map[string]string
 	At         time.Time
 	Completed  bool
+	Retries    int
 }
 
 func (t *Task) Dispose() {

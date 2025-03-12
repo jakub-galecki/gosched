@@ -69,9 +69,8 @@ type it struct {
 
 func (i *it) Into(task *scheduler.Task) error {
 	tmpTask := &Task{}
-	retries := 0
 
-	if err := i.Rows.Scan(&tmpTask.Id, &tmpTask.Method, &tmpTask.Parameters, &tmpTask.At, &tmpTask.Completed, &retries); err != nil {
+	if err := i.Rows.Scan(&tmpTask.Id, &tmpTask.Method, &tmpTask.Parameters, &tmpTask.At, &tmpTask.Completed, &tmpTask.Retries); err != nil {
 		return err
 	}
 

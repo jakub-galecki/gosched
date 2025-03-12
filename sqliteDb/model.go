@@ -13,6 +13,7 @@ type Task struct {
 	Parameters sql.RawBytes
 	At         time.Time
 	Completed  bool
+	Retries    int
 }
 
 func fromSchedulerTask(task *scheduler.Task) (*Task, error) {
